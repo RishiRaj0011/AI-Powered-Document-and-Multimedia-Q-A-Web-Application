@@ -5,11 +5,22 @@ import logging
 from typing import Any
 
 import redis.asyncio as aioredis
-from fastapi import Depends
+from fastapi import HTTPException, status
 
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
+
+
+class ServiceUnavailableException(HTTPException):
+    """Raised when Redis is unreachable or experiencing connection issues."""
+    
+    def __init__(self, detail: str = "Cache service temporarily unavailable"):
+        super().__init__(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=detail
+        )
+
 
 # ---------------------------------------------------------------------------
 # Singleton client
@@ -83,8 +94,11 @@ async def set_cache(
     try:
         serialised = json.dumps(value, default=str)
         await redis.set(key, serialised, ex=ttl)
+    except (aioredis.ConnectionError, aioredis.TimeoutError) as exc:
+        # Connection errors should be logged but not crash the request
+        logger.error("Redis connection error during set_cache for key=%r: %s", key, exc)
     except Exception as exc:
-        # Cache writes must never crash the request
+        # Other errors (serialization, etc.) should be logged as warnings
         logger.warning("set_cache failed for key=%r: %s", key, exc)
 
 
@@ -96,16 +110,36 @@ async def get_cache(redis: aioredis.Redis, key: str) -> Any | None:
         key:   Cache key string.
 
     Returns:
-        The deserialised Python object, or ``None`` if the key does not exist
-        or deserialisation fails.
+        The deserialised Python object, or ``None`` if the key does not exist.
+
+    Raises:
+        ServiceUnavailableException: If Redis is unreachable (connection error).
+        
+    Notes:
+        This function differentiates between:
+        - Cache miss (key doesn't exist): returns None
+        - Redis connection error: raises ServiceUnavailableException
+        - Deserialization error: logs warning and returns None
     """
     try:
         raw = await redis.get(key)
         if raw is None:
+            # Cache miss — key doesn't exist
             return None
         return json.loads(raw)
+    except (aioredis.ConnectionError, aioredis.TimeoutError) as exc:
+        # Redis is down or unreachable — raise exception to signal service degradation
+        logger.error("Redis connection error during get_cache for key=%r: %s", key, exc)
+        raise ServiceUnavailableException(
+            detail="Cache service temporarily unavailable. Please try again."
+        )
+    except json.JSONDecodeError as exc:
+        # Deserialization failed — log and treat as cache miss
+        logger.warning("JSON decode error for key=%r: %s", key, exc)
+        return None
     except Exception as exc:
-        logger.warning("get_cache failed for key=%r: %s", key, exc)
+        # Unexpected error — log and treat as cache miss to avoid breaking the request
+        logger.warning("Unexpected error in get_cache for key=%r: %s", key, exc)
         return None
 
 
@@ -118,5 +152,7 @@ async def delete_cache(redis: aioredis.Redis, key: str) -> None:
     """
     try:
         await redis.delete(key)
+    except (aioredis.ConnectionError, aioredis.TimeoutError) as exc:
+        logger.error("Redis connection error during delete_cache for key=%r: %s", key, exc)
     except Exception as exc:
         logger.warning("delete_cache failed for key=%r: %s", key, exc)

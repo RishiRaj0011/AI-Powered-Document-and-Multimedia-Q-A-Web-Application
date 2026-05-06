@@ -11,14 +11,12 @@ def chunk_text(
     chunk_size: int = 500,
     overlap: int = 50,
 ) -> list[dict]:
-    """Split *text* into overlapping chunks, respecting paragraph boundaries.
+    """Split *text* into overlapping chunks with character-level overlap.
 
     Strategy:
-    1. Split on blank lines to get paragraphs.
-    2. Accumulate paragraphs until the running character count exceeds
-       *chunk_size*, then emit a chunk.
-    3. The next chunk starts *overlap* characters back from the end of the
-       previous chunk (character-level overlap, not paragraph-level).
+    1. Flatten text into a single string (preserving paragraph breaks)
+    2. Use sliding window with character-level overlap
+    3. Ensure no semantic gaps between chunks
 
     Each returned dict::
 
@@ -27,74 +25,71 @@ def chunk_text(
             "chunk_index": int,
             "char_start": int,
             "char_end": int,
+            "topic_summary": str,  # 100-char snippet as default
         }
     """
     if not text or not text.strip():
         return []
 
-    # Normalise line endings and split into paragraphs
-    paragraphs = [p.strip() for p in re.split(r"\n{2,}", text.replace("\r\n", "\n"))]
-    paragraphs = [p for p in paragraphs if p]
-
+    # Normalize line endings
+    text = text.replace("\r\n", "\n")
+    text_len = len(text)
+    
     chunks: list[dict] = []
-    current_parts: list[str] = []
-    current_len = 0
-    char_cursor = 0  # tracks position in the original text
-
-    def _emit(parts: list[str], start: int) -> int:
-        """Flush accumulated parts as one chunk. Returns new char_cursor."""
-        chunk_text_str = "\n\n".join(parts)
-        end = start + len(chunk_text_str)
+    start = 0
+    
+    while start < text_len:
+        # Calculate end position for this chunk
+        end = min(start + chunk_size, text_len)
+        
+        # Extract chunk text
+        chunk_text = text[start:end]
+        
+        # If not at the end, try to break at a natural boundary (newline, space, punctuation)
+        if end < text_len:
+            # Look for paragraph break first (double newline)
+            last_para_break = chunk_text.rfind("\n\n")
+            if last_para_break > chunk_size * 0.5:  # Only if it's in the latter half
+                end = start + last_para_break + 2
+                chunk_text = text[start:end]
+            else:
+                # Look for single newline
+                last_newline = chunk_text.rfind("\n")
+                if last_newline > chunk_size * 0.5:
+                    end = start + last_newline + 1
+                    chunk_text = text[start:end]
+                else:
+                    # Look for space
+                    last_space = chunk_text.rfind(" ")
+                    if last_space > chunk_size * 0.5:
+                        end = start + last_space + 1
+                        chunk_text = text[start:end]
+        
+        # Generate topic_summary as 100-char snippet
+        topic_summary = chunk_text.strip()[:100]
+        if len(chunk_text.strip()) > 100:
+            topic_summary += "..."
+        
         chunks.append({
-            "text": chunk_text_str,
+            "text": chunk_text.strip(),
             "chunk_index": len(chunks),
             "char_start": start,
             "char_end": end,
+            "topic_summary": topic_summary,
         })
-        return end
-
-    for para in paragraphs:
-        para_len = len(para)
-
-        # Paragraph alone exceeds chunk_size — hard-split it by characters
-        if para_len > chunk_size:
-            # Flush whatever we have first
-            if current_parts:
-                char_cursor = _emit(current_parts, char_cursor)
-                # Apply overlap: step back by `overlap` chars for next chunk start
-                char_cursor = max(0, char_cursor - overlap)
-                current_parts = []
-                current_len = 0
-
-            # Hard-split the large paragraph
-            pos = 0
-            while pos < para_len:
-                end = min(pos + chunk_size, para_len)
-                slice_text = para[pos:end]
-                chunks.append({
-                    "text": slice_text,
-                    "chunk_index": len(chunks),
-                    "char_start": char_cursor + pos,
-                    "char_end": char_cursor + end,
-                })
-                pos = end - overlap if end < para_len else end
-            char_cursor += para_len
-            continue
-
-        # Adding this paragraph would exceed chunk_size — emit current batch first
-        if current_len + para_len > chunk_size and current_parts:
-            char_cursor = _emit(current_parts, char_cursor)
-            char_cursor = max(0, char_cursor - overlap)
-            current_parts = []
-            current_len = 0
-
-        current_parts.append(para)
-        current_len += para_len
-
-    # Flush remainder
-    if current_parts:
-        _emit(current_parts, char_cursor)
-
+        
+        # Move start position with overlap
+        # Ensure overlap is applied at character level across boundaries
+        start = end - overlap
+        
+        # Prevent infinite loop if overlap >= chunk_size
+        if start <= chunks[-1]["char_start"]:
+            start = end
+        
+        # Skip if remaining text is too small
+        if text_len - start < overlap:
+            break
+    
     return chunks
 
 
@@ -121,6 +116,7 @@ def chunk_transcript_by_segments(segments: list[dict]) -> list[dict]:
             "start_time": float,
             "end_time": float,
             "chunk_index": int,
+            "topic_summary": str,  # 100-char snippet as default
         }
     """
     if not segments:
@@ -132,11 +128,16 @@ def chunk_transcript_by_segments(segments: list[dict]) -> list[dict]:
 
     def _emit_chunk(segs: list[dict]) -> None:
         text = " ".join(s["text"].strip() for s in segs if s.get("text", "").strip())
+        # Generate topic_summary as 100-char snippet
+        topic_summary = text[:100].strip()
+        if len(text) > 100:
+            topic_summary += "..."
         chunks.append({
             "text": text,
             "start_time": round(segs[0]["start"], 3),
             "end_time": round(segs[-1]["end"], 3),
             "chunk_index": len(chunks),
+            "topic_summary": topic_summary,
         })
 
     for i, seg in enumerate(segments):
@@ -178,6 +179,7 @@ def chunk_pdf_by_pages(pages: list[dict]) -> list[dict]:
             "chunk_index": int,
             "page_start": int,
             "page_end": int,
+            "topic_summary": str,  # 100-char snippet as default
         }
     """
     if not pages:
@@ -190,11 +192,16 @@ def chunk_pdf_by_pages(pages: list[dict]) -> list[dict]:
         text = "\n\n".join(p.get("text", "").strip() for p in batch if p.get("text", "").strip())
         if not text:
             continue
+        # Generate topic_summary as 100-char snippet
+        topic_summary = text[:100].strip()
+        if len(text) > 100:
+            topic_summary += "..."
         chunks.append({
             "text": text,
             "chunk_index": len(chunks),
             "page_start": batch[0]["page_num"],
             "page_end": batch[-1]["page_num"],
+            "topic_summary": topic_summary,
         })
 
     return chunks

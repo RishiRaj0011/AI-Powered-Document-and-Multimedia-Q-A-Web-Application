@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   FileText,
@@ -10,6 +11,7 @@ import {
   Clock,
   MessageSquare,
 } from "lucide-react";
+import ConfirmDialog from "../ui/ConfirmDialog";
 
 function FileIcon({ fileType }) {
   if (fileType === "audio") return <Music size={22} className="text-purple-500 shrink-0" />;
@@ -68,6 +70,26 @@ function formatDate(iso) {
 
 export default function DocumentList({ documents, loading, onOpen, onDelete }) {
   const navigate = useNavigate();
+  const [confirmDialog, setConfirmDialog] = useState({ isOpen: false, docId: null, docName: "" });
+
+  const handleDeleteClick = (e, doc) => {
+    e.stopPropagation();
+    setConfirmDialog({
+      isOpen: true,
+      docId: doc.id,
+      docName: doc.filename
+    });
+  };
+
+  const handleConfirmDelete = () => {
+    if (confirmDialog.docId) {
+      onDelete(confirmDialog.docId);
+    }
+  };
+
+  const handleCloseDialog = () => {
+    setConfirmDialog({ isOpen: false, docId: null, docName: "" });
+  };
 
   if (loading) {
     return (
@@ -89,53 +111,63 @@ export default function DocumentList({ documents, loading, onOpen, onDelete }) {
   }
 
   return (
-    <div className="space-y-3">
-      {documents.map((doc) => (
-        <div
-          key={doc.id}
-          className="card flex items-center gap-4 cursor-pointer hover:shadow-md transition-shadow"
-          onClick={() => navigate(`/documents/${doc.id}`)}
-        >
-          <FileIcon fileType={doc.file_type} />
+    <>
+      <div className="space-y-3">
+        {documents.map((doc) => (
+          <div
+            key={doc.id}
+            className="card flex items-center gap-4 cursor-pointer hover:shadow-md transition-shadow"
+            onClick={() => navigate(`/documents/${doc.id}`)}
+          >
+            <FileIcon fileType={doc.file_type} />
 
-          <div className="flex-1 min-w-0">
-            <p className="font-medium text-gray-900 truncate text-sm">
-              {doc.filename}
-            </p>
-            <p className="text-xs text-gray-400 mt-0.5">
-              {formatSize(doc.file_size)} · {doc.file_type?.toUpperCase()} ·{" "}
-              {formatDate(doc.created_at)}
-            </p>
+            <div className="flex-1 min-w-0">
+              <p className="font-medium text-gray-900 truncate text-sm">
+                {doc.filename}
+              </p>
+              <p className="text-xs text-gray-400 mt-0.5">
+                {formatSize(doc.file_size)} · {doc.file_type?.toUpperCase()} ·{" "}
+                {formatDate(doc.created_at)}
+              </p>
+            </div>
+
+            <StatusBadge status={doc.status} errorMessage={doc.error_message} />
+
+            {/* Chat button — only when ready */}
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                navigate(`/documents/${doc.id}`);
+              }}
+              disabled={doc.status !== "ready"}
+              className="p-2 text-primary-600 hover:bg-primary-50 rounded-lg disabled:opacity-30 transition-colors"
+              title="Open chat"
+            >
+              <MessageSquare size={17} />
+            </button>
+
+            {/* Delete button */}
+            <button
+              onClick={(e) => handleDeleteClick(e, doc)}
+              className="p-2 text-red-400 hover:bg-red-50 hover:text-red-600 rounded-lg transition-colors"
+              title="Delete document"
+            >
+              <Trash2 size={17} />
+            </button>
           </div>
+        ))}
+      </div>
 
-          <StatusBadge status={doc.status} errorMessage={doc.error_message} />
-
-          {/* Chat button — only when ready */}
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              navigate(`/documents/${doc.id}`);
-            }}
-            disabled={doc.status !== "ready"}
-            className="p-2 text-primary-600 hover:bg-primary-50 rounded-lg disabled:opacity-30 transition-colors"
-            title="Open chat"
-          >
-            <MessageSquare size={17} />
-          </button>
-
-          {/* Delete button */}
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onDelete(doc.id);
-            }}
-            className="p-2 text-red-400 hover:bg-red-50 hover:text-red-600 rounded-lg transition-colors"
-            title="Delete document"
-          >
-            <Trash2 size={17} />
-          </button>
-        </div>
-      ))}
-    </div>
+      <ConfirmDialog
+        isOpen={confirmDialog.isOpen}
+        onClose={handleCloseDialog}
+        onConfirm={handleConfirmDelete}
+        title="Delete Document"
+        message={`Are you sure you want to delete "${confirmDialog.docName}"? This action cannot be undone.`}
+        confirmText="Delete"
+        cancelText="Cancel"
+        variant="danger"
+      />
+    </>
   );
 }

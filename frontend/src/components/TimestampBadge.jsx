@@ -1,10 +1,14 @@
+import { usePlayer } from "../contexts/PlayerContext";
+
 function formatTimestamp(seconds) {
   const m = Math.floor(seconds / 60);
   const s = Math.floor(seconds % 60);
   return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
 }
 
-export default function TimestampBadge({ startTime, playerRef, label }) {
+export default function TimestampBadge({ startTime, label }) {
+  const playerRef = usePlayer();
+
   const handleClick = () => {
     playerRef?.current?.seekTo(startTime);
   };

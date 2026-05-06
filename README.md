@@ -320,3 +320,192 @@ MIT License - see [LICENSE](LICENSE) file for details.
 ---
 
 **Built with ❤️ using FastAPI, React, and OpenAI**
+
+
+## DevOps & CI/CD
+
+### GitHub Actions Workflows
+
+This project includes two GitHub Actions workflows for automated testing and deployment:
+
+#### 1. Continuous Integration (`.github/workflows/ci.yml`)
+Runs on every push and pull request to validate code quality:
+- **Backend**: Linting (flake8, black), type checking (mypy), unit tests (pytest), coverage reporting
+- **Frontend**: Linting (ESLint), type checking (TypeScript), unit tests (Vitest), build validation
+- **Docker**: Multi-stage build validation for both backend and frontend images
+
+#### 2. Continuous Deployment (`.github/workflows/cd.yml`)
+Deploys to staging/production on successful merge to `main`:
+- Builds and tags Docker images
+- Pushes images to container registry (Docker Hub, AWS ECR, or custom registry)
+- Deploys to target environment using Docker Compose or Kubernetes
+- Runs smoke tests to validate deployment
+
+### Required GitHub Secrets
+
+Configure the following secrets in your GitHub repository settings (`Settings > Secrets and variables > Actions`):
+
+#### Core Application Secrets
+| Secret Name | Required | Description | Example |
+|---|---|---|---|
+| `SECRET_KEY` | ✅ Yes | JWT signing key for authentication | `openssl rand -hex 32` |
+| `OPENAI_API_KEY` | ✅ Yes | OpenAI API key for GPT-4o and Whisper | `sk-proj-...` |
+| `PINECONE_API_KEY` | ✅ Yes | Pinecone API key for vector database | `pcsk_...` |
+| `PINECONE_ENVIRONMENT` | ✅ Yes | Pinecone region/environment | `us-east-1` |
+| `PINECONE_INDEX_NAME` | No | Pinecone index name (defaults to `docqa-index`) | `docqa-prod` |
+
+#### Database & Cache Secrets
+| Secret Name | Required | Description | Example |
+|---|---|---|---|
+| `DATABASE_URL` | ✅ Yes | PostgreSQL connection string | `postgresql+asyncpg://user:pass@host:5432/db` |
+| `POSTGRES_USER` | ✅ Yes | PostgreSQL username | `docqa_user` |
+| `POSTGRES_PASSWORD` | ✅ Yes | PostgreSQL password | `secure_password_here` |
+| `POSTGRES_DB` | ✅ Yes | PostgreSQL database name | `docqa_prod` |
+| `REDIS_URL` | No | Redis connection string (defaults to `redis://redis:6379/0`) | `redis://redis.example.com:6379/0` |
+
+#### Container Registry Secrets
+| Secret Name | Required | Description | Example |
+|---|---|---|---|
+| `DOCKER_REGISTRY_URL` | No | Custom registry URL (defaults to Docker Hub) | `registry.example.com` |
+| `DOCKER_REGISTRY_USERNAME` | ✅ Yes* | Registry username | `myusername` |
+| `DOCKER_REGISTRY_TOKEN` | ✅ Yes* | Registry access token or password | `dckr_pat_...` |
+| `AWS_ACCESS_KEY_ID` | ✅ Yes** | AWS access key (if using ECR) | `AKIA...` |
+| `AWS_SECRET_ACCESS_KEY` | ✅ Yes** | AWS secret key (if using ECR) | `wJalrXUtn...` |
+| `AWS_REGION` | ✅ Yes** | AWS region (if using ECR) | `us-east-1` |
+
+\* Required if using Docker Hub or custom registry  
+\** Required if using AWS ECR
+
+#### Deployment Secrets
+| Secret Name | Required | Description | Example |
+|---|---|---|---|
+| `DEPLOY_HOST` | No | Deployment server hostname | `prod.example.com` |
+| `DEPLOY_SSH_KEY` | No | SSH private key for deployment | `-----BEGIN OPENSSH PRIVATE KEY-----...` |
+| `DEPLOY_USER` | No | SSH username for deployment | `deploy` |
+| `SLACK_WEBHOOK_URL` | No | Slack webhook for deployment notifications | `https://hooks.slack.com/services/...` |
+
+### Configuring Custom Container Registry
+
+#### Docker Hub (Default)
+```yaml
+# .github/workflows/cd.yml
+- name: Login to Docker Hub
+  uses: docker/login-action@v2
+  with:
+    username: ${{ secrets.DOCKER_REGISTRY_USERNAME }}
+    password: ${{ secrets.DOCKER_REGISTRY_TOKEN }}
+```
+
+#### AWS ECR
+```yaml
+# .github/workflows/cd.yml
+- name: Configure AWS credentials
+  uses: aws-actions/configure-aws-credentials@v2
+  with:
+    aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+    aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+    aws-region: ${{ secrets.AWS_REGION }}
+
+- name: Login to Amazon ECR
+  id: login-ecr
+  uses: aws-actions/amazon-ecr-login@v1
+```
+
+#### Custom Registry
+```yaml
+# .github/workflows/cd.yml
+- name: Login to Custom Registry
+  uses: docker/login-action@v2
+  with:
+    registry: ${{ secrets.DOCKER_REGISTRY_URL }}
+    username: ${{ secrets.DOCKER_REGISTRY_USERNAME }}
+    password: ${{ secrets.DOCKER_REGISTRY_TOKEN }}
+```
+
+### Local Development Setup
+
+1. **Clone and configure environment:**
+   ```bash
+   git clone https://github.com/yourusername/docqa.git
+   cd docqa
+   cp .env.example .env
+   # Edit .env with your local credentials
+   ```
+
+2. **Start services:**
+   ```bash
+   docker compose up --build
+   ```
+
+3. **Run tests locally:**
+   ```bash
+   # Backend tests (requires Docker for PostgreSQL container)
+   cd backend
+   pip install -r requirements.txt
+   pytest tests/ --cov=app --cov-report=html -v
+   
+   # Frontend tests
+   cd frontend
+   npm install
+   npm run test
+   ```
+
+### Production Deployment Checklist
+
+- [ ] Set `DEBUG=false` in production environment
+- [ ] Use strong `SECRET_KEY` (32+ random bytes)
+- [ ] Configure HTTPS/TLS certificates
+- [ ] Set up database backups (automated daily snapshots)
+- [ ] Configure log aggregation (CloudWatch, Datadog, or ELK stack)
+- [ ] Set up monitoring and alerting (Prometheus + Grafana)
+- [ ] Enable rate limiting in production (already configured via SlowAPI)
+- [ ] Configure CORS origins to match production domain
+- [ ] Set up CDN for frontend static assets (CloudFront, Cloudflare)
+- [ ] Implement database connection pooling (already configured via SQLAlchemy)
+- [ ] Configure Redis persistence (AOF or RDB snapshots)
+- [ ] Set up container health checks (already configured in docker-compose.yml)
+- [ ] Implement horizontal scaling (load balancer + multiple backend instances)
+- [ ] Configure object storage for uploads (S3, MinIO, or Azure Blob)
+- [ ] Set up secrets management (AWS Secrets Manager, HashiCorp Vault)
+
+### Monitoring & Observability
+
+The application includes built-in observability features:
+
+- **Structured JSON logging** with request IDs for tracing
+- **Health check endpoints** (`/api/v1/health/` and `/api/v1/health/ready`)
+- **Docker health checks** for all services
+- **Prometheus-compatible metrics** (can be added via `prometheus-fastapi-instrumentator`)
+- **Request/response timing** logged for performance analysis
+- **Error tracking** with full stack traces in logs (never exposed to clients)
+
+### Troubleshooting CI/CD
+
+#### Tests failing in CI but passing locally
+- Ensure PostgreSQL test container is available (requires Docker in CI environment)
+- Set `USE_POSTGRES_TESTS=false` to fallback to SQLite for environments without Docker
+- Check that all required secrets are configured in GitHub repository settings
+
+#### Docker build failures
+- Verify Dockerfile paths are correct relative to build context
+- Check that all dependencies are pinned to specific versions
+- Ensure multi-stage builds are properly configured
+
+#### Deployment failures
+- Verify SSH keys have correct permissions (600)
+- Check that deployment host is reachable from GitHub Actions runners
+- Validate that all required secrets are set and not expired
+- Review deployment logs in GitHub Actions workflow runs
+
+### Security Best Practices
+
+- **Never commit secrets** to version control (use `.env` files and `.gitignore`)
+- **Rotate secrets regularly** (every 90 days minimum)
+- **Use least-privilege IAM roles** for AWS deployments
+- **Enable 2FA** on all service accounts (GitHub, Docker Hub, AWS)
+- **Scan Docker images** for vulnerabilities (Trivy, Snyk, or AWS ECR scanning)
+- **Implement network policies** in Kubernetes to restrict pod-to-pod communication
+- **Use secrets management** tools instead of environment variables in production
+- **Enable audit logging** for all production systems
+- **Implement RBAC** for database and Redis access
+- **Use read-only file systems** in containers where possible

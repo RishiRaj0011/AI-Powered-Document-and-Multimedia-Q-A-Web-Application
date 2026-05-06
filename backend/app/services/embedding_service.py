@@ -127,6 +127,7 @@ def upsert_chunks(
     for i, (chunk, embedding) in enumerate(zip(chunks, embeddings)):
         metadata: dict[str, Any] = {
             "doc_id": str(doc_id),
+            "user_id": str(user_id),  # Add user_id for double-check security
             "text": chunk.get("text", "")[:1000],
             "chunk_index": chunk.get("chunk_index", i),
             "start_time": chunk.get("start_time"),
@@ -185,7 +186,10 @@ def search_similar(
     response = index.query(
         vector=query_embedding,
         top_k=top_k,
-        filter={"doc_id": {"$eq": str(doc_id)}},
+        filter={
+            "doc_id": {"$eq": str(doc_id)},
+            "user_id": {"$eq": str(user_id)}  # Double-check security layer
+        },
         include_metadata=True,
         namespace=namespace,
     )

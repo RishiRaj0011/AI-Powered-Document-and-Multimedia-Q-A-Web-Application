@@ -4,7 +4,7 @@ import { authAPI } from "../services/api";
 
 export const useAuthStore = create(
   persist(
-    (set, get) => ({
+    (set) => ({
       user: null,
       accessToken: null,
       refreshToken: null,
@@ -73,18 +73,13 @@ export const useAuthStore = create(
         }
       },
 
-      // Legacy setters kept so existing interceptor code doesn't break
+      // Legacy setters kept for backward compatibility with interceptor
       setTokens: (token, refreshToken) => {
         localStorage.setItem("access_token", token);
         localStorage.setItem("refresh_token", refreshToken);
         set({ accessToken: token, refreshToken, isAuthenticated: true });
       },
       setUser: (user) => set({ user }),
-
-      // Expose token under old name for any remaining consumers
-      get token() {
-        return get().accessToken;
-      },
     }),
     {
       name: "auth-storage",

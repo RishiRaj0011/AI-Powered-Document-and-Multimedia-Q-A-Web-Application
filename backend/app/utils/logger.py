@@ -1,5 +1,6 @@
 import json
 import logging
+import os
 import sys
 from datetime import datetime
 from typing import Any
@@ -16,6 +17,7 @@ class JSONFormatter(logging.Formatter):
             "module": record.module,
             "function": record.funcName,
             "line": record.lineno,
+            "pid": os.getpid(),  # Include process ID for multi-worker debugging
         }
 
         if record.exc_info:
@@ -27,6 +29,10 @@ class JSONFormatter(logging.Formatter):
         return json.dumps(log_data)
 
 
+# Track which loggers have been configured per process to avoid duplicates
+_configured_loggers: dict[tuple[str, int], bool] = {}
+
+
 def get_logger(name: str) -> logging.Logger:
     """Get a configured logger instance.
 
@@ -35,16 +41,30 @@ def get_logger(name: str) -> logging.Logger:
 
     Returns:
         Configured logger instance with JSON formatting
+
+    Notes:
+        - Uses process-specific tracking to prevent duplicate handlers in Uvicorn multi-worker mode
+        - Sets propagate=False to prevent duplicate logs from parent loggers
     """
     logger = logging.getLogger(name)
+    pid = os.getpid()
+    logger_key = (name, pid)
 
-    if logger.handlers:
+    # Check if this logger has already been configured for this process
+    if logger_key in _configured_loggers:
         return logger
 
+    # Configure logger
     logger.setLevel(logging.INFO)
+    logger.propagate = False  # Prevent duplicate logs in Uvicorn
 
-    handler = logging.StreamHandler(sys.stdout)
-    handler.setFormatter(JSONFormatter())
-    logger.addHandler(handler)
+    # Only add handler if none exist for this logger
+    if not logger.handlers:
+        handler = logging.StreamHandler(sys.stdout)
+        handler.setFormatter(JSONFormatter())
+        logger.addHandler(handler)
+
+    # Mark as configured for this process
+    _configured_loggers[logger_key] = True
 
     return logger

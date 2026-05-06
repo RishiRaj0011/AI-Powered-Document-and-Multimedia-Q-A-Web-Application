@@ -11,6 +11,8 @@ venv/
 # Environment
 .env
 !.env.example
+.env.local
+.env.*.local
 
 # Node
 node_modules/
@@ -31,3 +33,6 @@ Thumbs.db
 
 # Uploads
 /tmp/uploads/
+
+# Deprecated - nginx.conf now lives in docker/ directory only
+# frontend/nginx.conf is deleted - single source of truth in docker/nginx.conf

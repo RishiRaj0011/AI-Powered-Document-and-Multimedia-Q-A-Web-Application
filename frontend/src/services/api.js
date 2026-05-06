@@ -3,7 +3,9 @@ import axios from "axios";
 // ---------------------------------------------------------------------------
 // Axios instance
 // ---------------------------------------------------------------------------
-const api = axios.create({ baseURL: "/api/v1" });
+const api = axios.create({ 
+  baseURL: import.meta.env.VITE_API_URL ? `${import.meta.env.VITE_API_URL}/api/v1` : "/api/v1"
+});
 
 // ---------------------------------------------------------------------------
 // Request interceptor — attach access token

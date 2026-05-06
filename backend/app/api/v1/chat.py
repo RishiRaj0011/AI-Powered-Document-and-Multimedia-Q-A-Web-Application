@@ -117,7 +117,7 @@ async def get_session(
 # ---------------------------------------------------------------------------
 
 @router.post("/sessions/{session_id}/messages", response_model=ChatResponseOut)
-@limiter.limit("30/minute")
+@limiter.limit("60/minute")
 async def send_message(
     request: Request,
     session_id: int,
@@ -138,7 +138,9 @@ async def send_message(
 # ---------------------------------------------------------------------------
 
 @router.get("/sessions/{session_id}/stream")
+@limiter.limit("30/minute")
 async def stream_message(
+    request: Request,
     session_id: int,
     question: str = Query(..., min_length=1, max_length=2000),
     current_user: User = Depends(get_current_user),

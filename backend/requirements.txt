@@ -41,6 +41,10 @@ aiofiles==23.2.1
 pytest==8.2.2
 pytest-asyncio==0.23.7
 aiosqlite==0.20.0
+testcontainers[postgres]==4.4.1
 
 # Rate limiting
 slowapi==0.1.9
+
+# Token counting
+tiktoken==0.7.0

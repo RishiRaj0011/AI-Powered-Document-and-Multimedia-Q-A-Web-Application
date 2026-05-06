@@ -32,6 +32,10 @@ _SYSTEM_PROMPT = (
     "Be concise and accurate."
 )
 
+# Token management for context window
+MAX_CONTEXT_TOKENS = 6000  # Leave room for system prompt + response
+TOKENS_PER_MESSAGE_OVERHEAD = 4
+
 
 _client: AsyncOpenAI | None = None
 
@@ -44,6 +48,33 @@ def get_openai_client() -> AsyncOpenAI:
             raise RuntimeError("OPENAI_API_KEY not configured")
         _client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
     return _client
+
+
+def _count_tokens(text: str) -> int:
+    """Count tokens in text using tiktoken."""
+    try:
+        import tiktoken
+        enc = tiktoken.encoding_for_model("gpt-4o")
+        return len(enc.encode(text))
+    except Exception:
+        # Fallback: rough estimate (4 chars per token)
+        return len(text) // 4
+
+
+def _get_context_messages(
+    messages: list[ChatMessage], max_tokens: int = MAX_CONTEXT_TOKENS
+) -> list[ChatMessage]:
+    """Get as many recent messages as fit in token budget."""
+    result = []
+    total_tokens = 0
+    # Iterate from newest to oldest
+    for msg in reversed(messages):
+        tokens = _count_tokens(msg.content) + TOKENS_PER_MESSAGE_OVERHEAD
+        if total_tokens + tokens > max_tokens:
+            break
+        result.insert(0, msg)
+        total_tokens += tokens
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -144,8 +175,8 @@ async def ask_question(
             detail="Document is not ready for querying",
         )
 
-    history_msgs = await repo.get_recent_messages(session_id, limit=10)
-    history = _format_chat_history(history_msgs)
+    history_msgs = await repo.get_recent_messages(session_id, limit=100)
+    history = _format_chat_history(_get_context_messages(history_msgs))
 
     chunks = await _retrieve_chunks(session.document_id, question, user_id)
     context = _build_context(chunks)
@@ -220,8 +251,8 @@ async def stream_question(
         yield "data: [ERROR] Document not ready\n\n"
         return
 
-    history_msgs = await repo.get_recent_messages(session_id, limit=10)
-    history = _format_chat_history(history_msgs)
+    history_msgs = await repo.get_recent_messages(session_id, limit=100)
+    history = _format_chat_history(_get_context_messages(history_msgs))
 
     chunks = await _retrieve_chunks(session.document_id, question, user_id)
     context = _build_context(chunks)
@@ -338,19 +369,20 @@ async def get_topics(db: AsyncSession, doc_id: int) -> list[TopicOut]:
     """Return TimestampChunks that have a topic_summary, as TopicOut objects."""
     result = await db.execute(
         select(TimestampChunk)
-        .where(
-            TimestampChunk.document_id == doc_id,
-            TimestampChunk.topic_summary.isnot(None),
-        )
+        .where(TimestampChunk.document_id == doc_id)
         .order_by(TimestampChunk.chunk_index)
     )
     chunks = list(result.scalars().all())
-    return [
-        TopicOut(
-            label=c.topic_summary,
-            start_time=c.start_time,
-            end_time=c.end_time,
-            chunk_index=c.chunk_index,
+    topics = []
+    for c in chunks:
+        # Use fallback label if topic_summary is None or empty
+        label = c.topic_summary if c.topic_summary else f"Segment {c.chunk_index}"
+        topics.append(
+            TopicOut(
+                label=label,
+                start_time=c.start_time,
+                end_time=c.end_time,
+                chunk_index=c.chunk_index,
+            )
         )
-        for c in chunks
-    ]
+    return topics

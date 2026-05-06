@@ -53,12 +53,19 @@ async def process_document(document_id: int) -> None:
             await _run_pipeline(db, document_id)
         except Exception as e:
             await db.rollback()
+            # Log full error internally with stack trace
+            logger.error(
+                "Document processing failed for doc %d",
+                document_id,
+                exc_info=True
+            )
             async with AsyncSessionLocal() as err_db:
                 try:
+                    # Store generic message in DB — never expose internal details
                     await DocumentRepository(err_db).update_status(
                         document_id,
                         DocumentStatus.FAILED,
-                        error_message=f"{type(e).__name__}: {e}"
+                        error_message="Processing failed. Please try again or contact support."
                     )
                     await err_db.commit()
                 except Exception as inner:
@@ -103,12 +110,17 @@ async def _run_pipeline(db: AsyncSession, document_id: int) -> None:
 
     # ── Step 6: save TimestampChunk records ───────────────────────
     for chunk in chunks:
+        # Ensure topic_summary is never None — use fallback if missing
+        topic_summary = chunk.get("topic_summary")
+        if not topic_summary:
+            topic_summary = f"Segment {chunk['chunk_index']}"
+        
         ts_chunk = TimestampChunk(
             document_id=document_id,
             start_time=chunk.get("start_time", 0.0),
             end_time=chunk.get("end_time", 0.0),
             text_content=chunk["text"],
-            topic_summary=None,
+            topic_summary=topic_summary,
             chunk_index=chunk["chunk_index"],
         )
         db.add(ts_chunk)

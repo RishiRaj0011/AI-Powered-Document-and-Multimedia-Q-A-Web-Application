@@ -17,25 +17,45 @@ const MediaPlayer = forwardRef(function MediaPlayer({ src, type = "audio" }, ref
   const [duration, setDuration] = useState(0);
   const [speed, setSpeed] = useState(1);
   const [volume, setVolume] = useState(1);
+  const [autoplayError, setAutoplayError] = useState(false);
 
   useImperativeHandle(ref, () => ({
-    seekTo(seconds) {
-      if (mediaRef.current) {
-        mediaRef.current.currentTime = seconds;
-        mediaRef.current.play();
+    async seekTo(seconds) {
+      if (!mediaRef.current) return;
+      
+      mediaRef.current.currentTime = seconds;
+      
+      // Wrap play() in try-catch to handle autoplay policy rejections
+      try {
+        await mediaRef.current.play();
         setPlaying(true);
+        setAutoplayError(false);
+      } catch (error) {
+        // Browser blocked autoplay - user must explicitly click play
+        console.warn("Autoplay blocked by browser:", error);
+        setAutoplayError(true);
+        setPlaying(false);
       }
     },
   }));
 
-  const togglePlay = () => {
+  const togglePlay = async () => {
     if (!mediaRef.current) return;
+    
     if (playing) {
       mediaRef.current.pause();
+      setPlaying(false);
     } else {
-      mediaRef.current.play();
+      try {
+        await mediaRef.current.play();
+        setPlaying(true);
+        setAutoplayError(false);
+      } catch (error) {
+        console.warn("Play blocked by browser:", error);
+        setAutoplayError(true);
+        setPlaying(false);
+      }
     }
-    setPlaying(!playing);
   };
 
   const toggleMute = () => {
@@ -85,6 +105,12 @@ const MediaPlayer = forwardRef(function MediaPlayer({ src, type = "audio" }, ref
           onLoadedMetadata={(e) => setDuration(e.target.duration)}
           onEnded={() => setPlaying(false)}
         />
+      )}
+
+      {autoplayError && (
+        <div className="text-xs text-yellow-400 bg-yellow-900/30 px-2 py-1 rounded">
+          Click play to start — autoplay blocked by browser
+        </div>
       )}
 
       {/* Seekbar */}

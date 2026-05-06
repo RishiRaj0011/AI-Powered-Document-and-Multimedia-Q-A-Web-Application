@@ -18,7 +18,12 @@ from app.api.v1.router import api_router
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
-limiter = Limiter(key_func=get_remote_address)
+
+# Rate limiter with Redis storage for persistence across restarts
+limiter = Limiter(
+    key_func=get_remote_address,
+    storage_uri=settings.REDIS_URL
+)
 
 
 @asynccontextmanager
@@ -28,6 +33,17 @@ async def lifespan(app: FastAPI):
     await init_redis()
     # init_db() creates tables when running without Alembic (tests / dev)
     await init_db()
+    
+    # Check ffmpeg availability
+    from app.services.transcription_service import _check_ffmpeg
+    ffmpeg_available = await _check_ffmpeg()
+    if not ffmpeg_available:
+        logger.warning(
+            "ffmpeg not found — audio/video processing may be limited. "
+            "Install ffmpeg for full functionality."
+        )
+    app.state.ffmpeg_available = ffmpeg_available
+    
     yield
     # ---- shutdown ----
     await close_redis()
@@ -70,16 +86,26 @@ def create_app() -> FastAPI:
     @app.exception_handler(Exception)
     async def global_exception_handler(request: Request, exc: Exception):
         request_id = getattr(request.state, "request_id", "unknown")
+        
+        # Log full details internally — never send to client
         logger.error(
-            f"Unhandled exception: {exc}",
-            extra={"request_id": request_id},
+            "Unhandled exception",
+            extra={
+                "request_id": request_id,
+                "exception_type": type(exc).__name__,
+                "exception_message": str(exc),
+                "path": str(request.url),
+                "method": request.method,
+            },
             exc_info=True
         )
+        
+        # Send ONLY generic message to client
         return JSONResponse(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             content={
-                "detail": "Internal server error",
-                "request_id": request_id
+                "detail": "An internal error occurred. Please try again later.",
+                "request_id": request_id  # Safe — just a UUID
             }
         )
 

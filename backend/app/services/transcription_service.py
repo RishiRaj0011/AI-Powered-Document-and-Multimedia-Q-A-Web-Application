@@ -12,6 +12,7 @@ try:
 except ImportError:  # pragma: no cover
     fitz = None  # type: ignore[assignment]
 
+from fastapi import HTTPException, status
 from openai import AsyncOpenAI
 
 from app.core.config import settings
@@ -35,6 +36,27 @@ def get_openai_client() -> AsyncOpenAI:
             raise RuntimeError("OPENAI_API_KEY not configured")
         _client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
     return _client
+
+
+# ---------------------------------------------------------------------------
+# FFmpeg availability check
+# ---------------------------------------------------------------------------
+
+async def _check_ffmpeg() -> bool:
+    """Check if ffmpeg is available on the system."""
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "ffmpeg", "-version",
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL
+        )
+        await proc.communicate()
+        return proc.returncode == 0
+    except FileNotFoundError:
+        return False
+    except Exception as e:
+        logger.warning(f"FFmpeg check failed: {e}")
+        return False
 
 
 # ---------------------------------------------------------------------------
@@ -92,7 +114,12 @@ async def _transcribe_single(file_path: str, time_offset: float = 0.0) -> dict:
 
 async def _transcribe_large(file_path: str) -> dict:
     """Split file into chunks and transcribe each, merging results."""
-    chunk_paths = _split_audio(file_path, _SPLIT_CHUNK_SECONDS)
+    if not await _check_ffmpeg():
+        # Fallback: try to send full file if under 25MB
+        logger.warning("ffmpeg not available, attempting full file transcription")
+        return await _transcribe_single(file_path, time_offset=0.0)
+    
+    chunk_paths = await _split_audio(file_path, _SPLIT_CHUNK_SECONDS)
     try:
         merged_text: list[str] = []
         merged_segments: list[dict] = []
@@ -117,11 +144,11 @@ async def _transcribe_large(file_path: str) -> dict:
             Path(chunk_path).unlink(missing_ok=True)
 
 
-def _split_audio(file_path: str, chunk_seconds: int) -> list[tuple[str, float]]:
+async def _split_audio(file_path: str, chunk_seconds: int) -> list[tuple[str, float]]:
     """Use ffmpeg to split *file_path* into fixed-duration chunks.
 
     Returns list of (chunk_path, time_offset_seconds).
-    Raises RuntimeError if ffmpeg is not available.
+    Raises HTTPException if ffmpeg is not available.
     """
     tmp_dir = tempfile.mkdtemp(prefix="docqa_split_")
     pattern = os.path.join(tmp_dir, "chunk_%03d.mp3")
@@ -134,9 +161,16 @@ def _split_audio(file_path: str, chunk_seconds: int) -> list[tuple[str, float]]:
         "-c", "copy",
         pattern,
     ]
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
-    if result.returncode != 0:
-        raise RuntimeError(f"ffmpeg split failed: {result.stderr}")
+    
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+        if result.returncode != 0:
+            raise RuntimeError(f"ffmpeg split failed: {result.stderr}")
+    except FileNotFoundError:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Video processing unavailable: ffmpeg not installed. Please upload audio files directly."
+        )
 
     chunks = sorted(Path(tmp_dir).glob("chunk_*.mp3"))
     if not chunks:
@@ -186,12 +220,18 @@ def extract_pdf_text(file_path: str) -> dict:
 # Video audio extraction
 # ---------------------------------------------------------------------------
 
-def extract_video_audio(file_path: str) -> str:
+async def extract_video_audio(file_path: str) -> str:
     """Extract the audio track from a video file to a temp .mp3.
 
     Returns the path to the extracted audio file.
-    Raises RuntimeError if ffmpeg is not available or fails.
+    Raises HTTPException if ffmpeg is not available or fails.
     """
+    if not await _check_ffmpeg():
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Video processing unavailable: ffmpeg not installed. Please upload audio files directly."
+        )
+    
     tmp_fd, tmp_path = tempfile.mkstemp(suffix=".mp3", prefix="docqa_audio_")
     os.close(tmp_fd)
 
@@ -203,10 +243,18 @@ def extract_video_audio(file_path: str) -> str:
         "-q:a", "4",
         tmp_path,
     ]
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
-    if result.returncode != 0:
+    
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+        if result.returncode != 0:
+            Path(tmp_path).unlink(missing_ok=True)
+            raise RuntimeError(f"ffmpeg audio extraction failed: {result.stderr}")
+    except FileNotFoundError:
         Path(tmp_path).unlink(missing_ok=True)
-        raise RuntimeError(f"ffmpeg audio extraction failed: {result.stderr}")
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Video processing unavailable: ffmpeg not installed. Please upload audio files directly."
+        )
 
     return tmp_path
 

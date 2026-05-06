@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { Send } from "lucide-react";
 
 const MAX_CHARS = 2000;
@@ -6,6 +6,25 @@ const MAX_CHARS = 2000;
 export default function ChatInput({ onSend, disabled, placeholder = "Ask a question…" }) {
   const [value, setValue] = useState("");
   const textareaRef = useRef(null);
+
+  // ResizeObserver fallback for browsers without field-sizing support
+  useEffect(() => {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+
+    // Check if field-sizing is supported
+    const supportsFieldSizing = CSS.supports("field-sizing", "content");
+    if (supportsFieldSizing) return;
+
+    // Fallback: use ResizeObserver to manually adjust height
+    const observer = new ResizeObserver(() => {
+      textarea.style.height = "auto";
+      textarea.style.height = `${Math.min(textarea.scrollHeight, 160)}px`;
+    });
+
+    observer.observe(textarea);
+    return () => observer.disconnect();
+  }, []);
 
   const handleKeyDown = (e) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -19,16 +38,10 @@ export default function ChatInput({ onSend, disabled, placeholder = "Ask a quest
     if (!trimmed || disabled) return;
     onSend(trimmed);
     setValue("");
-    // Reset textarea height
-    if (textareaRef.current) textareaRef.current.style.height = "auto";
   };
 
   const handleChange = (e) => {
     setValue(e.target.value.slice(0, MAX_CHARS));
-    // Auto-grow
-    const el = e.target;
-    el.style.height = "auto";
-    el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
   };
 
   const remaining = MAX_CHARS - value.length;
@@ -38,7 +51,11 @@ export default function ChatInput({ onSend, disabled, placeholder = "Ask a quest
       <div className="flex items-end gap-3">
         <textarea
           ref={textareaRef}
-          className="input-field flex-1 resize-none min-h-[42px] max-h-40 leading-relaxed"
+          className="input-field flex-1 resize-none min-h-[42px] max-h-40 leading-relaxed [field-sizing:content]"
+          style={{
+            // Fallback for browsers without field-sizing support
+            overflow: "hidden",
+          }}
           placeholder={placeholder}
           value={value}
           onChange={handleChange}

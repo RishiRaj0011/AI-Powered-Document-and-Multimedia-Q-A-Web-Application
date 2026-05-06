@@ -1,4 +1,5 @@
 import Markdown from "react-markdown";
+import rehypeSanitize from "rehype-sanitize";
 import TimestampBadge from "../TimestampBadge";
 import { Bot } from "lucide-react";
 
@@ -32,7 +33,9 @@ export default function ChatMessage({ message, playerRef, isStreaming = false })
           }`}
         >
           <div className="prose prose-sm max-w-none prose-p:my-1 prose-ul:my-1 prose-li:my-0">
-            <Markdown>{message.content}</Markdown>
+            <Markdown rehypePlugins={[rehypeSanitize]}>
+              {message.content}
+            </Markdown>
           </div>
           {isStreaming && (
             <span className="inline-block w-1.5 h-4 bg-primary-500 animate-pulse ml-0.5 align-middle" />
@@ -46,7 +49,6 @@ export default function ChatMessage({ message, playerRef, isStreaming = false })
               <TimestampBadge
                 key={i}
                 startTime={ref.start_time}
-                playerRef={playerRef}
                 label={ref.text ? ref.text.slice(0, 40) : undefined}
               />
             ))}
