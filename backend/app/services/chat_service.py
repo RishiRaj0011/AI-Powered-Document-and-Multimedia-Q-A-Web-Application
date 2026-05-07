@@ -8,7 +8,7 @@ from typing import Any
 
 from fastapi import HTTPException, status
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
-from openai import AsyncOpenAI
+from app.services.llm_service import get_llm_service
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -37,17 +37,15 @@ MAX_CONTEXT_TOKENS = 6000  # Leave room for system prompt + response
 TOKENS_PER_MESSAGE_OVERHEAD = 4
 
 
-_client: AsyncOpenAI | None = None
+_llm_service = None
 
 
-def get_openai_client() -> AsyncOpenAI:
-    """Get or create the singleton OpenAI client."""
-    global _client
-    if _client is None:
-        if not settings.OPENAI_API_KEY:
-            raise RuntimeError("OPENAI_API_KEY not configured")
-        _client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
-    return _client
+def get_llm_client():
+    """Get or create the unified LLM service."""
+    global _llm_service
+    if _llm_service is None:
+        _llm_service = get_llm_service()
+    return _llm_service
 
 
 def _count_tokens(text: str) -> int:
@@ -98,13 +96,17 @@ def _format_chat_history(messages: list[ChatMessage]) -> list[BaseMessage]:
 # Retrieval
 # ---------------------------------------------------------------------------
 
-async def _retrieve_chunks(doc_id: int, question: str, user_id: int) -> list[dict]:
-    """Embed *question* and return top-5 similar chunks for *doc_id*."""
+async def _retrieve_chunks(doc_id: int | None, question: str, user_id: int) -> list[dict]:
+    """Embed *question* and return top-5 similar chunks.
+    
+    If doc_id is None, searches across all user documents.
+    """
     embeddings = await generate_embeddings([question])
     if not embeddings:
         return []
     index = init_pinecone()
-    return search_similar(index, embeddings[0], str(doc_id), user_id, top_k=5)
+    doc_id_str = str(doc_id) if doc_id is not None else None
+    return search_similar(index, embeddings[0], doc_id_str, user_id, top_k=5)
 
 
 def _build_context(chunks: list[dict]) -> str:
@@ -159,6 +161,7 @@ async def ask_question(
     session_id: int,
     question: str,
     user_id: int,
+    search_all_docs: bool = False,
 ) -> ChatResponseOut:
     repo = ChatRepository(db)
     doc_repo = DocumentRepository(db)
@@ -178,21 +181,18 @@ async def ask_question(
     history_msgs = await repo.get_recent_messages(session_id, limit=100)
     history = _format_chat_history(_get_context_messages(history_msgs))
 
-    chunks = await _retrieve_chunks(session.document_id, question, user_id)
+    doc_id_for_search = None if search_all_docs else session.document_id
+    chunks = await _retrieve_chunks(doc_id_for_search, question, user_id)
     context = _build_context(chunks)
     messages = _build_messages(question, context, history)
 
-    client = get_openai_client()
+    llm = get_llm_client()
     t0 = time.monotonic()
-    response = await client.chat.completions.create(
-        model=settings.OPENAI_CHAT_MODEL,
-        messages=messages,
-        temperature=0.2,
-    )
+    response = await llm.chat_completion(messages, temperature=0.2)
     latency_ms = (time.monotonic() - t0) * 1000
 
-    answer = response.choices[0].message.content or ""
-    tokens = response.usage.total_tokens if response.usage else 0
+    answer = response["choices"][0]["message"]["content"]
+    tokens = response["usage"]["total_tokens"]
 
     # Persist messages
     await repo.add_message(session_id, MessageRole.USER, question)
@@ -232,6 +232,7 @@ async def stream_question(
     session_id: int,
     question: str,
     user_id: int,
+    search_all_docs: bool = False,
 ) -> AsyncGenerator[str, None]:
     """Yield SSE-formatted tokens, then save the full response to DB.
 
@@ -254,28 +255,22 @@ async def stream_question(
     history_msgs = await repo.get_recent_messages(session_id, limit=100)
     history = _format_chat_history(_get_context_messages(history_msgs))
 
-    chunks = await _retrieve_chunks(session.document_id, question, user_id)
+    doc_id_for_search = None if search_all_docs else session.document_id
+    chunks = await _retrieve_chunks(doc_id_for_search, question, user_id)
     context = _build_context(chunks)
     messages = _build_messages(question, context, history)
 
-    client = get_openai_client()
+    llm = get_llm_client()
     full_response: list[str] = []
 
     await repo.add_message(session_id, MessageRole.USER, question)
 
     try:
-        async with client.chat.completions.stream(
-            model=settings.OPENAI_CHAT_MODEL,
-            messages=messages,
-            temperature=0.2,
-        ) as stream:
-            async for event in stream:
-                delta = event.choices[0].delta.content if event.choices else None
-                if delta:
-                    full_response.append(delta)
-                    # Escape newlines inside the SSE data field
-                    safe = delta.replace("\n", "\\n")
-                    yield f"data: {safe}\n\n"
+        async for delta in llm.chat_completion_stream(messages, temperature=0.2):
+            full_response.append(delta)
+            # Escape newlines inside the SSE data field
+            safe = delta.replace("\n", "\\n")
+            yield f"data: {safe}\n\n"
     except Exception as exc:
         logger.error("Streaming error for session %d: %s", session_id, exc)
         yield f"data: [ERROR] {exc}\n\n"
@@ -331,15 +326,13 @@ async def summarize_document(
         f"Document excerpts:\n{sample_text}"
     )
 
-    client = get_openai_client()
-    response = await client.chat.completions.create(
-        model=settings.OPENAI_CHAT_MODEL,
-        messages=[{"role": "user", "content": prompt}],
+    llm = get_llm_client()
+    response = await llm.chat_completion(
+        [{"role": "user", "content": prompt}],
         temperature=0.1,
-        response_format={"type": "json_object"},
     )
 
-    raw = response.choices[0].message.content or "{}"
+    raw = response["choices"][0]["message"]["content"]
     try:
         parsed = json.loads(raw)
     except json.JSONDecodeError:

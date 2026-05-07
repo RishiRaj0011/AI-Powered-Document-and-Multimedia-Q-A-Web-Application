@@ -68,7 +68,7 @@ function formatDate(iso) {
   });
 }
 
-export default function DocumentList({ documents, loading, onOpen, onDelete }) {
+export default function DocumentList({ documents, summaries = {}, loading, onOpen, onDelete }) {
   const navigate = useNavigate();
   const [confirmDialog, setConfirmDialog] = useState({ isOpen: false, docId: null, docName: "" });
 
@@ -116,44 +116,55 @@ export default function DocumentList({ documents, loading, onOpen, onDelete }) {
         {documents.map((doc) => (
           <div
             key={doc.id}
-            className="card flex items-center gap-4 cursor-pointer hover:shadow-md transition-shadow"
+            className="card cursor-pointer hover:shadow-md transition-shadow"
             onClick={() => navigate(`/documents/${doc.id}`)}
           >
-            <FileIcon fileType={doc.file_type} />
+            <div className="flex items-start gap-4">
+              <FileIcon fileType={doc.file_type} />
 
-            <div className="flex-1 min-w-0">
-              <p className="font-medium text-gray-900 truncate text-sm">
-                {doc.filename}
-              </p>
-              <p className="text-xs text-gray-400 mt-0.5">
-                {formatSize(doc.file_size)} · {doc.file_type?.toUpperCase()} ·{" "}
-                {formatDate(doc.created_at)}
-              </p>
+              <div className="flex-1 min-w-0">
+                <p className="font-medium text-gray-900 truncate text-sm">
+                  {doc.filename}
+                </p>
+                <p className="text-xs text-gray-400 mt-0.5">
+                  {formatSize(doc.file_size)} · {doc.file_type?.toUpperCase()} ·{" "}
+                  {formatDate(doc.created_at)}
+                </p>
+                
+                {/* Summary preview - 2 lines max */}
+                {summaries[doc.id] && doc.status === "ready" && (
+                  <p className="text-xs text-gray-600 mt-2 line-clamp-2 leading-relaxed">
+                    {summaries[doc.id]}
+                  </p>
+                )}
+              </div>
+
+              <div className="flex items-center gap-2 shrink-0">
+                <StatusBadge status={doc.status} errorMessage={doc.error_message} />
+
+                {/* Chat button — only when ready */}
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    navigate(`/documents/${doc.id}`);
+                  }}
+                  disabled={doc.status !== "ready"}
+                  className="p-2 text-primary-600 hover:bg-primary-50 rounded-lg disabled:opacity-30 transition-colors"
+                  title="Open chat"
+                >
+                  <MessageSquare size={17} />
+                </button>
+
+                {/* Delete button */}
+                <button
+                  onClick={(e) => handleDeleteClick(e, doc)}
+                  className="p-2 text-red-400 hover:bg-red-50 hover:text-red-600 rounded-lg transition-colors"
+                  title="Delete document"
+                >
+                  <Trash2 size={17} />
+                </button>
+              </div>
             </div>
-
-            <StatusBadge status={doc.status} errorMessage={doc.error_message} />
-
-            {/* Chat button — only when ready */}
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                navigate(`/documents/${doc.id}`);
-              }}
-              disabled={doc.status !== "ready"}
-              className="p-2 text-primary-600 hover:bg-primary-50 rounded-lg disabled:opacity-30 transition-colors"
-              title="Open chat"
-            >
-              <MessageSquare size={17} />
-            </button>
-
-            {/* Delete button */}
-            <button
-              onClick={(e) => handleDeleteClick(e, doc)}
-              className="p-2 text-red-400 hover:bg-red-50 hover:text-red-600 rounded-lg transition-colors"
-              title="Delete document"
-            >
-              <Trash2 size={17} />
-            </button>
           </div>
         ))}
       </div>

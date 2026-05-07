@@ -7,6 +7,7 @@ import ChatInput from "../components/chat/ChatInput";
 import SessionList from "../components/chat/SessionList";
 import MediaPlayer from "../components/MediaPlayer";
 import SummaryPanel from "../components/SummaryPanel";
+import TranscriptView from "../components/TranscriptView";
 import {
   FileText,
   Music,
@@ -14,6 +15,8 @@ import {
   ArrowLeft,
   ChevronRight,
   ChevronLeft,
+  MessageSquare,
+  FileType,
 } from "lucide-react";
 import toast from "react-hot-toast";
 
@@ -41,6 +44,9 @@ export default function ChatPage() {
   const [summaryData, setSummaryData] = useState(null);
   const [summaryLoading, setSummaryLoading] = useState(false);
   const [rightPanelOpen, setRightPanelOpen] = useState(true);
+  const [activeTab, setActiveTab] = useState("chat");
+  const [searchAllDocs, setSearchAllDocs] = useState(false);
+  const [transcript, setTranscript] = useState(null);
 
   // Fetch document metadata
   const { data: doc, isLoading: docLoading } = useQuery(
@@ -76,6 +82,14 @@ export default function ChatPage() {
   // Cleanup SSE on unmount
   useEffect(() => () => eventSourceRef.current?.close(), []);
 
+  // Load transcript for media files
+  useEffect(() => {
+    if (!isMedia || !docId) return;
+    documentsAPI.getTranscript(docId)
+      .then(setTranscript)
+      .catch(() => {});
+  }, [isMedia, docId]);
+
   // ------------------------------------------------------------------
   // Ensure a session exists before sending
   // ------------------------------------------------------------------
@@ -110,7 +124,7 @@ export default function ChatPage() {
     // Close any existing SSE connection
     eventSourceRef.current?.close();
 
-    const url = chatAPI.getStreamUrl(sessionId, question);
+    const url = chatAPI.getStreamUrl(sessionId, question, searchAllDocs);
     // Attach auth header via fetch + ReadableStream (EventSource doesn't support headers)
     const accessToken = localStorage.getItem("access_token");
 
@@ -267,6 +281,32 @@ export default function ChatPage() {
               {doc.file_type} · {doc.status}
             </p>
           </div>
+          {isMedia && (
+            <div className="flex gap-2 shrink-0">
+              <button
+                onClick={() => setActiveTab("chat")}
+                className={`px-3 py-1 text-xs rounded transition-colors ${
+                  activeTab === "chat"
+                    ? "bg-primary-600 text-white"
+                    : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                }`}
+              >
+                <MessageSquare size={12} className="inline mr-1" />
+                Chat
+              </button>
+              <button
+                onClick={() => setActiveTab("transcript")}
+                className={`px-3 py-1 text-xs rounded transition-colors ${
+                  activeTab === "transcript"
+                    ? "bg-primary-600 text-white"
+                    : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                }`}
+              >
+                <FileType size={12} className="inline mr-1" />
+                Transcript
+              </button>
+            </div>
+          )}
           <button
             onClick={handleSummaryToggle}
             className="text-xs text-primary-600 hover:underline shrink-0"
@@ -290,59 +330,87 @@ export default function ChatPage() {
           </div>
         )}
 
-        {/* Messages */}
-        <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
-          {messages.length === 0 && !streaming && (
-            <div className="text-center text-gray-400 mt-20">
-              <FileTypeIcon fileType={doc.file_type} size={40} />
-              <p className="mt-3 text-base font-medium text-gray-500">
-                Ask anything about this {doc.file_type}
-              </p>
-              <p className="text-sm text-gray-400 mt-1">
-                {doc.status === "ready"
-                  ? "Document is ready — start chatting"
-                  : "Document is still processing…"}
-              </p>
+        {/* Content area - Chat or Transcript */}
+        {activeTab === "chat" ? (
+          <>
+            <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
+              {messages.length === 0 && !streaming && (
+                <div className="text-center text-gray-400 mt-20">
+                  <FileTypeIcon fileType={doc.file_type} size={40} />
+                  <p className="mt-3 text-base font-medium text-gray-500">
+                    Ask anything about this {doc.file_type}
+                  </p>
+                  <p className="text-sm text-gray-400 mt-1">
+                    {doc.status === "ready"
+                      ? "Document is ready — start chatting"
+                      : "Document is still processing…"}
+                  </p>
+                  <label className="inline-flex items-center gap-2 mt-4 text-xs text-gray-600 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={searchAllDocs}
+                      onChange={(e) => setSearchAllDocs(e.target.checked)}
+                      className="rounded"
+                    />
+                    Search across all my documents
+                  </label>
+                </div>
+              )}
+
+              {messages.map((msg, i) => (
+                <ChatMessage key={i} message={msg} playerRef={playerRef} />
+              ))}
+
+              {streaming && streamBuffer && (
+                <ChatMessage
+                  message={{ role: "assistant", content: streamBuffer }}
+                  playerRef={playerRef}
+                  isStreaming
+                />
+              )}
+
+              {streaming && !streamBuffer && (
+                <div className="flex items-center gap-2 text-gray-400 text-sm">
+                  <span className="inline-flex gap-1">
+                    <span className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce [animation-delay:0ms]" />
+                    <span className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce [animation-delay:150ms]" />
+                    <span className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce [animation-delay:300ms]" />
+                  </span>
+                  Thinking…
+                </div>
+              )}
+
+              <div ref={bottomRef} />
             </div>
-          )}
 
-          {messages.map((msg, i) => (
-            <ChatMessage key={i} message={msg} playerRef={playerRef} />
-          ))}
+            <div className="px-4 pb-2 shrink-0">
+              <label className="inline-flex items-center gap-2 text-xs text-gray-600 cursor-pointer mb-2">
+                <input
+                  type="checkbox"
+                  checked={searchAllDocs}
+                  onChange={(e) => setSearchAllDocs(e.target.checked)}
+                  className="rounded"
+                />
+                Search across all my documents
+              </label>
+            </div>
 
-          {/* Streaming token buffer */}
-          {streaming && streamBuffer && (
-            <ChatMessage
-              message={{ role: "assistant", content: streamBuffer }}
-              playerRef={playerRef}
-              isStreaming
+            <ChatInput
+              onSend={handleSend}
+              disabled={streaming || doc.status !== "ready"}
+              placeholder={
+                doc.status !== "ready"
+                  ? "Document is processing…"
+                  : "Ask a question…"
+              }
             />
-          )}
-
-          {/* Typing indicator when waiting for first token */}
-          {streaming && !streamBuffer && (
-            <div className="flex items-center gap-2 text-gray-400 text-sm">
-              <span className="inline-flex gap-1">
-                <span className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce [animation-delay:0ms]" />
-                <span className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce [animation-delay:150ms]" />
-                <span className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce [animation-delay:300ms]" />
-              </span>
-              Thinking…
-            </div>
-          )}
-
-          <div ref={bottomRef} />
-        </div>
-
-        <ChatInput
-          onSend={handleSend}
-          disabled={streaming || doc.status !== "ready"}
-          placeholder={
-            doc.status !== "ready"
-              ? "Document is processing…"
-              : "Ask a question…"
-          }
-        />
+          </>
+        ) : (
+          <TranscriptView
+            transcriptSegments={transcript?.chunks}
+            playerRef={playerRef}
+          />
+        )}
       </div>
 
       {/* ---------------------------------------------------------------- */}

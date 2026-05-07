@@ -37,9 +37,14 @@ class Settings(BaseSettings):
     PINECONE_INDEX_NAME: str = "docqa-index"
 
     # ------------------------------------------------------------------ OpenAI
-    OPENAI_API_KEY: str
+    OPENAI_API_KEY: str = ""  # Optional if using Gemini
     OPENAI_CHAT_MODEL: str = "gpt-4o"
     OPENAI_EMBEDDING_MODEL: str = "text-embedding-3-small"
+
+    # ------------------------------------------------------------------ Google Gemini
+    GOOGLE_API_KEY: str = ""  # Free tier: 15 RPM, 1M TPM
+    GEMINI_MODEL: str = "gemini-1.5-flash"
+    GEMINI_EMBEDDING_MODEL: str = "models/embedding-001"
 
     # ------------------------------------------------------------------ File upload
     MAX_FILE_SIZE_MB: int = 50

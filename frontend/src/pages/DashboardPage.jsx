@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "react-query";
 import { useNavigate } from "react-router-dom";
 import { documentsAPI } from "../services/api";
@@ -12,6 +12,7 @@ export default function DashboardPage() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const pollRef = useRef(null);
+  const [summaries, setSummaries] = useState({});
 
   const { data, isLoading, refetch } = useQuery(
     "documents",
@@ -20,6 +21,22 @@ export default function DashboardPage() {
   );
 
   const documents = data?.documents ?? [];
+
+  // Fetch summaries for ready documents
+  useEffect(() => {
+    const readyDocs = documents.filter(d => d.status === "ready");
+    
+    readyDocs.forEach(async (doc) => {
+      if (!summaries[doc.id]) {
+        try {
+          const summary = await documentsAPI.getSummary(doc.id);
+          setSummaries(prev => ({ ...prev, [doc.id]: summary.summary }));
+        } catch (error) {
+          // Silently fail - summary is optional
+        }
+      }
+    });
+  }, [documents]);
 
   // Poll every 3 s while any document is still PROCESSING or PENDING
   useEffect(() => {
@@ -58,6 +75,18 @@ export default function DashboardPage() {
     }
   );
 
+  const uploadMultipleMutation = useMutation(
+    (files) => documentsAPI.uploadMultiple(files),
+    {
+      onSuccess: (data) => {
+        queryClient.invalidateQueries("documents");
+        toast.success(`${data.length} files uploaded — processing started`);
+      },
+      onError: (err) =>
+        toast.error(err.response?.data?.detail || "Upload failed"),
+    }
+  );
+
   const deleteMutation = useMutation((id) => documentsAPI.delete(id), {
     onSuccess: () => {
       queryClient.invalidateQueries("documents");
@@ -79,18 +108,16 @@ export default function DashboardPage() {
         onUpload={(file, onProgress) =>
           uploadMutation.mutate({ file, onProgress })
         }
-        loading={uploadMutation.isLoading}
+        onUploadMultiple={(files) => uploadMultipleMutation.mutate(files)}
+        loading={uploadMutation.isLoading || uploadMultipleMutation.isLoading}
       />
 
       <DocumentList
         documents={documents}
+        summaries={summaries}
         loading={isLoading}
         onOpen={(doc) => navigate(`/documents/${doc.id}`)}
-        onDelete={(id) => {
-          if (window.confirm("Delete this document?")) {
-            deleteMutation.mutate(id);
-          }
-        }}
+        onDelete={(id) => deleteMutation.mutate(id)}
       />
     </div>
   );

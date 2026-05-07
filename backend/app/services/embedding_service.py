@@ -3,10 +3,10 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from openai import AsyncOpenAI
 from pinecone import Pinecone, ServerlessSpec
 
 from app.core.config import settings
+from app.services.llm_service import get_llm_service
 
 logger = logging.getLogger(__name__)
 
@@ -21,17 +21,22 @@ _UPSERT_BATCH_SIZE = 100
 def init_pinecone():
     """Return the Pinecone Index object, creating it if it doesn't exist.
 
-    Creates a serverless index with dimension=1536 (text-embedding-3-small)
-    and cosine metric if the index doesn't already exist.
+    Creates a serverless index with appropriate dimension based on LLM provider:
+    - OpenAI: 1536 (text-embedding-3-small)
+    - Gemini: 768 (embedding-001)
     """
     pc = Pinecone(api_key=settings.PINECONE_API_KEY)
     existing = [i.name for i in pc.list_indexes()]
     
     if settings.PINECONE_INDEX_NAME not in existing:
-        logger.info("Creating Pinecone index: %s", settings.PINECONE_INDEX_NAME)
+        # Get embedding dimension from LLM service
+        llm = get_llm_service()
+        dimension = llm.get_embedding_dimension()
+        
+        logger.info("Creating Pinecone index: %s (dimension=%d)", settings.PINECONE_INDEX_NAME, dimension)
         pc.create_index(
             name=settings.PINECONE_INDEX_NAME,
-            dimension=1536,  # text-embedding-3-small dimension
+            dimension=dimension,
             metric="cosine",
             spec=ServerlessSpec(
                 cloud="aws",
@@ -52,7 +57,7 @@ def init_pinecone():
 # ---------------------------------------------------------------------------
 
 async def generate_embeddings(texts: list[str]) -> list[list[float]]:
-    """Embed *texts* using OpenAI text-embedding-3-small.
+    """Embed *texts* using configured LLM provider (OpenAI or Gemini).
 
     Batches requests in groups of ``_EMBED_BATCH_SIZE`` (100) to stay within
     the API's per-request token limits and avoid rate-limit errors.
@@ -62,7 +67,7 @@ async def generate_embeddings(texts: list[str]) -> list[list[float]]:
     if not texts:
         return []
 
-    client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+    llm = get_llm_service()
     all_embeddings: list[list[float]] = []
 
     for batch_start in range(0, len(texts), _EMBED_BATCH_SIZE):
@@ -70,12 +75,7 @@ async def generate_embeddings(texts: list[str]) -> list[list[float]]:
         # Strip empty strings — the API rejects them
         safe_batch = [t if t.strip() else " " for t in batch]
 
-        response = await client.embeddings.create(
-            model=settings.OPENAI_EMBEDDING_MODEL,
-            input=safe_batch,
-        )
-        # Response data is ordered by index
-        batch_vectors = [item.embedding for item in sorted(response.data, key=lambda x: x.index)]
+        batch_vectors = await llm.generate_embeddings(safe_batch)
         all_embeddings.extend(batch_vectors)
         logger.debug(
             "Embedded batch %d–%d (%d vectors)",
@@ -163,11 +163,18 @@ def upsert_chunks(
 def search_similar(
     index,
     query_embedding: list[float],
-    doc_id: str,
+    doc_id: str | None,
     user_id: int,
     top_k: int = 5,
 ) -> list[dict]:
-    """Query Pinecone for the *top_k* most similar chunks belonging to *doc_id* in user's namespace.
+    """Query Pinecone for the *top_k* most similar chunks in user's namespace.
+
+    Args:
+        index: Pinecone index
+        query_embedding: Query vector
+        doc_id: Document ID to filter by, or None to search all documents
+        user_id: User ID for namespace isolation
+        top_k: Number of results to return
 
     Returns::
 
@@ -178,18 +185,22 @@ def search_similar(
                 "start_time": float | None,
                 "end_time": float | None,
                 "chunk_index": int,
+                "doc_id": str,  # Included when searching across documents
             },
             ...
         ]
     """
     namespace = f"user_{user_id}"
+    
+    # Build filter - always include user_id, optionally include doc_id
+    filter_dict = {"user_id": {"$eq": str(user_id)}}
+    if doc_id is not None:
+        filter_dict["doc_id"] = {"$eq": str(doc_id)}
+    
     response = index.query(
         vector=query_embedding,
         top_k=top_k,
-        filter={
-            "doc_id": {"$eq": str(doc_id)},
-            "user_id": {"$eq": str(user_id)}  # Double-check security layer
-        },
+        filter=filter_dict,
         include_metadata=True,
         namespace=namespace,
     )
@@ -197,12 +208,16 @@ def search_similar(
     results: list[dict] = []
     for match in response.get("matches", []):
         meta = match.get("metadata", {})
-        results.append({
+        result = {
             "text": meta.get("text", ""),
             "score": float(match.get("score", 0.0)),
             "start_time": meta.get("start_time"),
             "end_time": meta.get("end_time"),
             "chunk_index": meta.get("chunk_index"),
-        })
+        }
+        # Include doc_id when searching across documents
+        if doc_id is None:
+            result["doc_id"] = meta.get("doc_id")
+        results.append(result)
 
     return results

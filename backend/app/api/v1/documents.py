@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from pathlib import Path
 
@@ -66,7 +67,7 @@ async def _process_document(doc_id: int, db_url: str) -> None:
 
 
 # ---------------------------------------------------------------------------
-# POST /upload
+# POST /upload (single file)
 # ---------------------------------------------------------------------------
 
 @router.post("/upload", response_model=DocumentOut, status_code=status.HTTP_201_CREATED)
@@ -102,6 +103,74 @@ async def upload_document(
     background_tasks.add_task(_process_document, doc.id, settings.DATABASE_URL)
 
     return DocumentOut.model_validate(doc)
+
+
+# ---------------------------------------------------------------------------
+# POST /upload-multiple (multi-file upload)
+# ---------------------------------------------------------------------------
+
+@router.post("/upload-multiple", response_model=list[DocumentOut], status_code=status.HTTP_201_CREATED)
+@limiter.limit("3/minute")
+async def upload_multiple_documents(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    files: list[UploadFile] = File(...),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    redis=Depends(get_redis),
+) -> list[DocumentOut]:
+    """Upload multiple files in parallel.
+    
+    Validates all files first, then processes them concurrently.
+    Returns list of created documents.
+    """
+    if not files:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No files provided"
+        )
+    
+    if len(files) > 10:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Maximum 10 files per request"
+        )
+    
+    # Validate all files first
+    validation_tasks = [validate_file(file) for file in files]
+    await asyncio.gather(*validation_tasks)
+    
+    # Save files in parallel
+    save_tasks = [save_file(file, current_user.id) for file in files]
+    file_paths = await asyncio.gather(*save_tasks)
+    
+    # Create database records
+    repo = DocumentRepository(db)
+    created_docs = []
+    
+    for file, file_path in zip(files, file_paths):
+        ext = Path(file.filename).suffix.lstrip(".").lower()
+        file_type = _EXTENSION_TO_TYPE.get(ext, DocumentType.TXT)
+        info = get_file_info(file_path)
+        
+        doc = await repo.create(
+            user_id=current_user.id,
+            filename=Path(file_path).name,
+            file_type=file_type,
+            file_path=file_path,
+            file_size=info["size_bytes"],
+            original_filename=file.filename,
+        )
+        created_docs.append(doc)
+    
+    await delete_cache(redis, _doc_cache_key(current_user.id))
+    
+    # Schedule background processing for all documents
+    from app.core.config import settings
+    for doc in created_docs:
+        background_tasks.add_task(_process_document, doc.id, settings.DATABASE_URL)
+    
+    return [DocumentOut.model_validate(doc) for doc in created_docs]
 
 
 # ---------------------------------------------------------------------------
@@ -230,3 +299,62 @@ async def get_document_topics(
         )
     from app.services import chat_service
     return await chat_service.get_topics(db=db, doc_id=doc_id)
+
+
+# ---------------------------------------------------------------------------
+# GET /{doc_id}/transcript
+# ---------------------------------------------------------------------------
+
+@router.get("/{doc_id}/transcript")
+async def get_document_transcript(
+    doc_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get full transcript with timestamps for audio/video documents."""
+    from sqlalchemy import select
+    from app.models.transcript import Transcript
+    from app.models.timestamp_chunk import TimestampChunk
+    
+    repo = DocumentRepository(db)
+    doc = await repo.get_by_id_and_owner(doc_id, current_user.id)
+    if doc is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Document {doc_id} not found",
+        )
+    
+    # Get transcript
+    result = await db.execute(
+        select(Transcript).where(Transcript.document_id == doc_id)
+    )
+    transcript = result.scalar_one_or_none()
+    
+    if not transcript:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No transcript available for this document"
+        )
+    
+    # Get timestamp chunks
+    result = await db.execute(
+        select(TimestampChunk)
+        .where(TimestampChunk.document_id == doc_id)
+        .order_by(TimestampChunk.chunk_index)
+    )
+    chunks = list(result.scalars().all())
+    
+    return {
+        "full_text": transcript.full_text,
+        "language": transcript.language,
+        "duration_seconds": transcript.duration_seconds,
+        "chunks": [
+            {
+                "text": chunk.text_content,
+                "start_time": chunk.start_time,
+                "end_time": chunk.end_time,
+                "chunk_index": chunk.chunk_index,
+            }
+            for chunk in chunks
+        ]
+    }

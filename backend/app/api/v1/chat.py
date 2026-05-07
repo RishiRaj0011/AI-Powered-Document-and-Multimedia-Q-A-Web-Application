@@ -122,6 +122,7 @@ async def send_message(
     request: Request,
     session_id: int,
     body: SendMessageRequest,
+    search_all: bool = Query(False, description="Search across all user documents"),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> ChatResponseOut:
@@ -130,6 +131,7 @@ async def send_message(
         session_id=session_id,
         question=body.question,
         user_id=current_user.id,
+        search_all_docs=search_all,
     )
 
 
@@ -143,6 +145,7 @@ async def stream_message(
     request: Request,
     session_id: int,
     question: str = Query(..., min_length=1, max_length=2000),
+    search_all: bool = Query(False, description="Search across all user documents"),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> StreamingResponse:
@@ -152,6 +155,7 @@ async def stream_message(
             session_id=session_id,
             question=question,
             user_id=current_user.id,
+            search_all_docs=search_all,
         ),
         media_type="text/event-stream",
         headers={

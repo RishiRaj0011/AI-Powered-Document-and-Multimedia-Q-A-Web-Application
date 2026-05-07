@@ -1,6 +1,6 @@
 import { useState, useCallback } from "react";
 import { useDropzone } from "react-dropzone";
-import { Upload, CheckCircle, XCircle, File } from "lucide-react";
+import { Upload, CheckCircle, XCircle, File, Loader } from "lucide-react";
 
 const ACCEPTED = {
   "application/pdf": [".pdf"],
@@ -16,44 +16,73 @@ const ACCEPTED = {
 };
 
 const MAX_SIZE_MB = 50;
+const MAX_FILES = 10;
 
-export default function DocumentUpload({ onUpload, loading }) {
-  const [progress, setProgress] = useState(0);
-  const [lastFile, setLastFile] = useState(null);
+export default function DocumentUpload({ onUpload, onUploadMultiple, loading }) {
+  const [progress, setProgress] = useState({});
+  const [uploadingFiles, setUploadingFiles] = useState([]);
   const [rejected, setRejected] = useState([]);
   const [done, setDone] = useState(false);
 
   const onDrop = useCallback(
-    (accepted, rejectedFiles) => {
+    async (accepted, rejectedFiles) => {
       setRejected(rejectedFiles);
       setDone(false);
+      
       if (!accepted.length) return;
-      const file = accepted[0];
-      setLastFile(file.name);
-      setProgress(0);
-      onUpload(file, (pct) => setProgress(pct));
-      // Mark done after upload completes (parent sets loading=false)
+      
+      // Multi-file upload
+      if (accepted.length > 1 && onUploadMultiple) {
+        setUploadingFiles(accepted.map(f => f.name));
+        setProgress({});
+        
+        try {
+          await onUploadMultiple(accepted);
+          setDone(true);
+          setTimeout(() => {
+            setDone(false);
+            setUploadingFiles([]);
+            setProgress({});
+          }, 2500);
+        } catch (error) {
+          setUploadingFiles([]);
+          setProgress({});
+        }
+      } 
+      // Single file upload
+      else {
+        const file = accepted[0];
+        setUploadingFiles([file.name]);
+        setProgress({ [file.name]: 0 });
+        
+        onUpload(file, (pct) => {
+          setProgress({ [file.name]: pct });
+        });
+      }
     },
-    [onUpload]
+    [onUpload, onUploadMultiple]
   );
 
-  // When loading transitions false→true→false, show success briefly
-  const prevLoading = loading;
-  if (!loading && progress === 100 && lastFile && !done) {
-    setDone(true);
-    setTimeout(() => {
-      setDone(false);
-      setProgress(0);
-      setLastFile(null);
-    }, 2500);
+  // When loading transitions to false, show success briefly
+  if (!loading && uploadingFiles.length > 0 && !done) {
+    const allComplete = Object.values(progress).every(p => p === 100) || Object.keys(progress).length === 0;
+    if (allComplete) {
+      setDone(true);
+      setTimeout(() => {
+        setDone(false);
+        setProgress({});
+        setUploadingFiles([]);
+      }, 2500);
+    }
   }
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
     accept: ACCEPTED,
-    maxFiles: 1,
+    maxFiles: MAX_FILES,
     maxSize: MAX_SIZE_MB * 1024 * 1024,
     disabled: loading,
+    multiple: true,
   });
 
   return (
@@ -73,29 +102,39 @@ export default function DocumentUpload({ onUpload, loading }) {
         {done ? (
           <>
             <CheckCircle className="mx-auto mb-3 text-green-500" size={36} />
-            <p className="text-green-700 font-medium text-sm">{lastFile} uploaded!</p>
+            <p className="text-green-700 font-medium text-sm">
+              {uploadingFiles.length} file{uploadingFiles.length > 1 ? "s" : ""} uploaded!
+            </p>
           </>
         ) : loading ? (
           <>
-            <File className="mx-auto mb-3 text-primary-400 animate-pulse" size={36} />
-            <p className="text-gray-600 font-medium text-sm">Uploading {lastFile}…</p>
-            {progress > 0 && (
-              <div className="mt-3 mx-auto w-48 bg-gray-200 rounded-full h-1.5">
-                <div
-                  className="bg-primary-500 h-1.5 rounded-full transition-all"
-                  style={{ width: `${progress}%` }}
-                />
+            <Loader className="mx-auto mb-3 text-primary-400 animate-spin" size={36} />
+            <p className="text-gray-600 font-medium text-sm">
+              Uploading {uploadingFiles.length} file{uploadingFiles.length > 1 ? "s" : ""}…
+            </p>
+            {Object.entries(progress).map(([filename, pct]) => (
+              <div key={filename} className="mt-2">
+                <p className="text-xs text-gray-500 mb-1">{filename}</p>
+                <div className="mx-auto w-48 bg-gray-200 rounded-full h-1.5">
+                  <div
+                    className="bg-primary-500 h-1.5 rounded-full transition-all"
+                    style={{ width: `${pct}%` }}
+                  />
+                </div>
               </div>
-            )}
+            ))}
           </>
         ) : (
           <>
             <Upload className="mx-auto mb-3 text-gray-400" size={36} />
             <p className="text-gray-700 font-medium">
-              {isDragActive ? "Drop file here" : "Drag & drop or click to upload"}
+              {isDragActive ? "Drop files here" : "Drag & drop or click to upload"}
             </p>
             <p className="text-xs text-gray-400 mt-2">
-              PDF, DOCX, TXT, MP3, WAV, M4A, WEBM, MP4 · Max {MAX_SIZE_MB} MB
+              PDF, DOCX, TXT, MP3, WAV, M4A, WEBM, MP4 · Max {MAX_SIZE_MB} MB per file
+            </p>
+            <p className="text-xs text-gray-500 mt-1">
+              Select multiple files (up to {MAX_FILES}) for batch upload
             </p>
           </>
         )}

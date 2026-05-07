@@ -118,12 +118,22 @@ export const documentsAPI = {
       })
       .then((r) => r.data);
   },
+  uploadMultiple: (files) => {
+    const form = new FormData();
+    files.forEach(file => form.append("files", file));
+    return api
+      .post("/documents/upload-multiple", form, {
+        headers: { "Content-Type": "multipart/form-data" },
+      })
+      .then((r) => r.data);
+  },
   list: () => api.get("/documents/").then((r) => r.data),
   get: (id) => api.get(`/documents/${id}`).then((r) => r.data),
   getStatus: (id) => api.get(`/documents/${id}/status`).then((r) => r.data),
   delete: (id) => api.delete(`/documents/${id}`),
   getSummary: (id) => api.get(`/documents/${id}/summary`).then((r) => r.data),
   getTopics: (id) => api.get(`/documents/${id}/topics`).then((r) => r.data),
+  getTranscript: (id) => api.get(`/documents/${id}/transcript`).then((r) => r.data),
 };
 
 export const chatAPI = {
@@ -136,8 +146,11 @@ export const chatAPI = {
       .post(`/chat/sessions/${sessionId}/messages`, { question })
       .then((r) => r.data),
   // SSE streaming — returns a native EventSource-compatible URL
-  getStreamUrl: (sessionId, question) =>
-    `/api/v1/chat/sessions/${sessionId}/stream?question=${encodeURIComponent(question)}`,
+  getStreamUrl: (sessionId, question, searchAllDocs = false) => {
+    const params = new URLSearchParams({ question });
+    if (searchAllDocs) params.append("search_all", "true");
+    return `/api/v1/chat/sessions/${sessionId}/stream?${params.toString()}`;
+  },
 };
 
 export default api;

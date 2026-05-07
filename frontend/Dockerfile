@@ -4,7 +4,7 @@ WORKDIR /app
 
 # Copy manifests first for layer caching
 COPY frontend/package.json frontend/package-lock.json* ./
-RUN npm ci --prefer-offline
+RUN npm install
 
 COPY frontend/ .
 RUN npm run build
