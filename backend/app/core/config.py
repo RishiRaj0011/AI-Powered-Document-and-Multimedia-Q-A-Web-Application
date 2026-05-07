@@ -53,7 +53,9 @@ class Settings(BaseSettings):
 
     # ------------------------------------------------------------------ CORS
     # Accepts either a JSON array string or a comma-separated string from .env
+    # Can be set as CORS_ORIGINS or ALLOWED_ORIGINS (both supported)
     CORS_ORIGINS: List[str] = ["http://localhost:3000"]
+    ALLOWED_ORIGINS: List[str] | None = None  # Alias for CORS_ORIGINS
 
     @field_validator("CORS_ORIGINS", mode="before")
     @classmethod
@@ -66,6 +68,11 @@ class Settings(BaseSettings):
                 return json.loads(stripped)
             return [origin.strip() for origin in stripped.split(",") if origin.strip()]
         raise ValueError(f"Cannot parse CORS_ORIGINS from {v!r}")
+
+    def model_post_init(self, __context) -> None:
+        """Support ALLOWED_ORIGINS as alias for CORS_ORIGINS."""
+        if self.ALLOWED_ORIGINS is not None:
+            self.CORS_ORIGINS = self.ALLOWED_ORIGINS
 
     @field_validator("ALLOWED_EXTENSIONS", mode="before")
     @classmethod

@@ -75,12 +75,12 @@ goto menu
 
 :edit_env
 echo.
-echo Opening .env file in notepad...
-notepad .env
+echo Opening backend/.env file in notepad...
+notepad backend\.env
 echo.
 echo Make sure you have filled:
 echo - SECRET_KEY
-echo - OPENAI_API_KEY
+echo - GOOGLE_API_KEY
 echo - PINECONE_API_KEY
 echo - PINECONE_ENVIRONMENT
 pause
