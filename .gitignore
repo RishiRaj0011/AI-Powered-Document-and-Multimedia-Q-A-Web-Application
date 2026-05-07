@@ -13,6 +13,14 @@ venv/
 !.env.example
 .env.local
 .env.*.local
+backend/.env
+frontend/.env
+
+# Security - Never commit these
+*.pem
+*.key
+*.cert
+secrets.txt
 
 # Node
 node_modules/

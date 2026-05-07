@@ -30,11 +30,11 @@ docker-compose up -d
 Your API keys are already configured in `backend/.env`:
 
 ```bash
-# ✅ Google Gemini (Configured)
-GOOGLE_API_KEY=AIzaSyDclhdnAXULUekjz6vbRCqSmE6hIVMsr5E
+# ✅ Google Gemini (Generate new key from https://aistudio.google.com/app/apikey)
+GOOGLE_API_KEY=YOUR_NEW_GOOGLE_API_KEY_HERE
 
-# ✅ Pinecone (Configured)
-PINECONE_API_KEY=pcsk_6ppCvc_QTzgPJAbcd7N6L4HebuWnBXGKvC4TTAvQgY7QDirf2w9vHgUXAbnjRLDmonDzqM
+# ✅ Pinecone (Generate new key from https://app.pinecone.io/)
+PINECONE_API_KEY=YOUR_NEW_PINECONE_API_KEY_HERE
 
 # ⚠️ OpenAI (Optional - Not configured)
 OPENAI_API_KEY=YOUR_OPENAI_API_KEY_HERE

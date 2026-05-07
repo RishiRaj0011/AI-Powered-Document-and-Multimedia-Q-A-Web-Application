@@ -77,11 +77,13 @@ DATABASE_URL=postgresql+asyncpg://docqa:docqa_secure_password_2024@postgres:5432
 
 ---
 
-### 4. ✅ API Keys Configuration (VERIFIED)
+### ✅ API Keys Configuration (VERIFIED)
 **Configured Keys:**
-- ✅ Google Gemini API Key: `AIzaSyDclhdnAXULUekjz6vbRCqSmE6hIVMsr5E`
-- ✅ Pinecone API Key: `pcsk_6ppCvc_QTzgPJAbcd7N6L4HebuWnBXGKvC4TTAvQgY7QDirf2w9vHgUXAbnjRLDmonDzqM`
+- ✅ Google Gemini API Key: `[REDACTED - Key has been revoked and regenerated]`
+- ✅ Pinecone API Key: `[REDACTED - Key has been revoked and regenerated]`
 - ⚠️ OpenAI API Key: Not configured (Optional - Gemini is primary)
+
+**⚠️ SECURITY NOTE:** Original keys were exposed and have been revoked. New keys generated.
 
 **Result:** AI chat and vector search fully functional
 
