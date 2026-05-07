@@ -1,8 +1,7 @@
-from __future__ import annotations
-
 import asyncio
 import logging
 from pathlib import Path
+from typing import List, Dict
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Request, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -23,7 +22,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/documents", tags=["documents"])
 limiter = Limiter(key_func=get_remote_address)
 
-_EXTENSION_TO_TYPE: dict[str, DocumentType] = {
+_EXTENSION_TO_TYPE: Dict[str, DocumentType] = {
     "pdf": DocumentType.PDF,
     "docx": DocumentType.DOCX,
     "txt": DocumentType.TXT,
@@ -109,16 +108,16 @@ async def upload_document(
 # POST /upload-multiple (multi-file upload)
 # ---------------------------------------------------------------------------
 
-@router.post("/upload-multiple", response_model=list[DocumentOut], status_code=status.HTTP_201_CREATED)
+@router.post("/upload-multiple", response_model=List[DocumentOut], status_code=status.HTTP_201_CREATED)
 @limiter.limit("3/minute")
 async def upload_multiple_documents(
     request: Request,
     background_tasks: BackgroundTasks,
-    files: list[UploadFile] = File(...),
+    files: List[UploadFile] = File(...),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     redis=Depends(get_redis),
-) -> list[DocumentOut]:
+) -> List[DocumentOut]:
     """Upload multiple files in parallel.
     
     Validates all files first, then processes them concurrently.
@@ -284,12 +283,12 @@ async def get_document_summary(
 # GET /{doc_id}/topics
 # ---------------------------------------------------------------------------
 
-@router.get("/{doc_id}/topics", response_model=list[TopicOut])
+@router.get("/{doc_id}/topics", response_model=List[TopicOut])
 async def get_document_topics(
     doc_id: int,
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
-) -> list[TopicOut]:
+) -> List[TopicOut]:
     repo = DocumentRepository(db)
     doc = await repo.get_by_id_and_owner(doc_id, current_user.id)
     if doc is None:

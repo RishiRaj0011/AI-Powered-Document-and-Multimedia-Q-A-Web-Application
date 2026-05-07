@@ -1,33 +1,20 @@
-from __future__ import annotations
-
-from typing import TYPE_CHECKING
-
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 from slowapi import Limiter
 from slowapi.util import get_remote_address
+from typing import Optional
 
 from app.core.dependencies import get_current_user, get_db
 from app.core.redis import get_redis
 from app.models.user import User
-
-if TYPE_CHECKING:
-    from app.schemas.user import (
-        LoginRequest,
-        RefreshRequest,
-        RegisterRequest,
-        TokenResponse,
-        UserOut,
-    )
-else:
-    from app.schemas import user as user_schemas
-    LoginRequest = user_schemas.LoginRequest
-    RefreshRequest = user_schemas.RefreshRequest
-    RegisterRequest = user_schemas.RegisterRequest
-    TokenResponse = user_schemas.TokenResponse
-    UserOut = user_schemas.UserOut
-
+from app.schemas.user import (
+    LoginRequest,
+    RefreshRequest,
+    RegisterRequest,
+    TokenResponse,
+    UserOut,
+)
 from app.services.auth_service import AuthService
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -102,7 +89,7 @@ async def me(current_user: User = Depends(get_current_user)) -> UserOut:
 
 @router.post("/logout", status_code=status.HTTP_200_OK)
 async def logout(
-    credentials: HTTPAuthorizationCredentials | None = Depends(_bearer),
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(_bearer),
     redis=Depends(get_redis),
 ) -> dict:
     """Blacklist the supplied access token's jti in Redis.

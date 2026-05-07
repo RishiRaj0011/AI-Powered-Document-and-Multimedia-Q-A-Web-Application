@@ -1,6 +1,5 @@
-from __future__ import annotations
-
 import logging
+from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
@@ -64,11 +63,11 @@ async def create_session(
 # GET /chat/sessions
 # ---------------------------------------------------------------------------
 
-@router.get("/sessions", response_model=list[ChatSessionOut])
+@router.get("/sessions", response_model=List[ChatSessionOut])
 async def list_sessions(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-) -> list[ChatSessionOut]:
+) -> List[ChatSessionOut]:
     repo = ChatRepository(db)
     # Single query returns (ChatSession, message_count) tuples — no N+1
     rows = await repo.get_sessions_by_user(current_user.id)
